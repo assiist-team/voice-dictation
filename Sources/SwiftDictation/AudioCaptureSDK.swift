@@ -14,6 +14,7 @@ public class AudioCaptureSDK {
     private var chunker: AudioChunker?
     private var streamer: AudioStreamer?
     private var storage: AudioStorage?
+    private var metricsLogger: MetricsLogger?
     
     #if os(iOS) || os(macOS)
     private var speech: NativeSpeechRecognizer?
@@ -42,6 +43,8 @@ public class AudioCaptureSDK {
     public var onFinalTranscript: ((String) -> Void)?
     // Interruption recovery callback
     public var onInterruptionRecovered: (() -> Void)?
+    // Metrics callback
+    public var onMetrics: ((MetricsEvent) -> Void)?
     
     public init(config: AudioCaptureConfig) {
         self.config = config
@@ -155,15 +158,26 @@ public class AudioCaptureSDK {
         let vad = VoiceActivityDetector(sensitivity: config.vadSensitivity, sampleRate: config.sampleRate)
         self.vad = vad
         
+        // Initialize metrics logger
+        let metricsLogger = MetricsLogger()
+        metricsLogger.onMetricsEvent = { [weak self] event in
+            self?.onMetrics?(event)
+        }
+        self.metricsLogger = metricsLogger
+        
         let chunker = AudioChunker(
             chunkDurationMs: config.chunkDurationMs,
             sampleRate: config.sampleRate,
-            deviceId: self.deviceId
+            deviceId: self.deviceId,
+            metricsLogger: metricsLogger
         )
         chunker.onChunkReady = { [weak self] data, metadata in
             self?.handleChunkReady(data: data, metadata: metadata)
         }
         self.chunker = chunker
+        
+        // Start CPU sampling
+        metricsLogger.startCPUSampling()
         
         // Setup audio buffer callback
         engine.onAudioBuffer = { [weak self] buffer, time in
@@ -218,6 +232,9 @@ public class AudioCaptureSDK {
         rawAudioData.removeAll()
         processedAudioData.removeAll()
         isPaused = false
+        
+        // Reset metrics for new session
+        self.metricsLogger?.reset()
         
         try engine.start()
     }
@@ -274,6 +291,10 @@ public class AudioCaptureSDK {
         speech?.cancelBlock()
         speech = nil
         #endif
+        
+        // Stop metrics collection
+        metricsLogger?.stopCPUSampling()
+        metricsLogger = nil
         
         captureEngine = nil
         isPaused = false
@@ -668,6 +689,9 @@ public class AudioCaptureSDK {
     #endif
     
     private func handleAudioBuffer(buffer: AVAudioPCMBuffer, time: AVAudioTime) {
+        // Capture timestamp at receive time (monotonic)
+        let captureTime = ProcessInfo.processInfo.systemUptime
+        
         // Process audio
         let processedBuffer = preprocessor?.process(buffer: buffer) ?? buffer
         
@@ -696,7 +720,10 @@ public class AudioCaptureSDK {
             channels: config.channels
         )
         
-        // Notify frame callback
+        // Notify frame callback and measure latency
+        let frameDeliveryTime = ProcessInfo.processInfo.systemUptime
+        let frameLatencyMs = (frameDeliveryTime - captureTime) * 1000.0
+        metricsLogger?.recordFrameLatency(frameLatencyMs)
         onFrame?(frame)
         
         // VAD processing
