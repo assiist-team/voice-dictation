@@ -50,7 +50,7 @@ internal class AudioStreamer {
         }
         
         // Create message with metadata and audio data
-        let message: [String: Any] = [
+        let payload: [String: Any] = [
             "sequenceId": metadata.sequenceId,
             "startTimestamp": metadata.startTimestamp,
             "endTimestamp": metadata.endTimestamp,
@@ -59,13 +59,13 @@ internal class AudioStreamer {
             "audioData": data.base64EncodedString()
         ]
         
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             throw AudioCaptureError.streamingFailed(NSError(domain: "AudioStreamer", code: -1))
         }
         
-        let message = URLSessionWebSocketTask.Message.string(jsonString)
-        webSocketTask.send(message) { [weak self] error in
+        let socketMessage = URLSessionWebSocketTask.Message.string(jsonString)
+        webSocketTask.send(socketMessage) { [weak self] error in
             if let error = error {
                 self?.onError?(AudioCaptureError.streamingFailed(error))
             } else {
@@ -80,10 +80,10 @@ internal class AudioStreamer {
             case .success(let message):
                 // Handle ACK or other server messages
                 switch message {
-                case .string(let text):
+                case .string(_):
                     // Parse ACK if needed
                     break
-                case .data(let data):
+                case .data(_):
                     // Handle binary ACK if needed
                     break
                 @unknown default:

@@ -283,7 +283,7 @@ public class AudioCaptureSDK {
         
         // Save raw audio
         if config.persistRawAudio, let sessionId = currentSessionId, let storage = storage, !rawAudioData.isEmpty {
-            try? storage.saveRawAudio(rawAudioData, sessionId: sessionId)
+            _ = try? storage.saveRawAudio(rawAudioData, sessionId: sessionId)
         }
         
         // Clean up speech recognizer

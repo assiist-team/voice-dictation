@@ -22,9 +22,8 @@ internal class AudioPreprocessor {
             self.highPassFilter = highPass
             audioEngine.attach(highPass)
             
-            if let inputNode = audioEngine.inputNode {
-                audioEngine.connect(inputNode, to: highPass, format: nil)
-            }
+            let inputNode = audioEngine.inputNode
+            audioEngine.connect(inputNode, to: highPass, format: nil)
         }
         
         // AGC (Automatic Gain Control) - simplified using time pitch unit

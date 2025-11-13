@@ -3,7 +3,7 @@ import AVFoundation
 
 /// Handles local storage of raw and processed audio
 internal class AudioStorage {
-    private let storageDirectory: URL
+    private var storageDirectory: URL
     
     init() throws {
         let appSupportPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -66,6 +66,12 @@ internal class AudioStorage {
             throw AudioCaptureError.exportFailed(NSError(domain: "AudioCaptureSDK", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot export empty audio buffer"]))
         }
         
+        // Ensure destination exists before opening for writing
+        let fileManager = FileManager.default
+        if !fileManager.fileExists(atPath: destination.path) {
+            fileManager.createFile(atPath: destination.path, contents: nil, attributes: nil)
+        }
+
         let file = try FileHandle(forWritingTo: destination)
         defer { try? file.close() }
         

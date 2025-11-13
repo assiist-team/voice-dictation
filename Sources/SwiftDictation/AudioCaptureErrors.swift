@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors that can occur during audio capture
-public enum AudioCaptureError: LocalizedError {
+public enum AudioCaptureError: LocalizedError, Equatable {
     case permissionDenied
     case permissionNotDetermined
     case audioSessionConfigurationFailed
@@ -41,6 +41,37 @@ public enum AudioCaptureError: LocalizedError {
             return "Invalid audio format"
         case .deviceInterrupted:
             return "Audio capture was interrupted by device"
+        }
+    }
+
+    // Manual Equatable implementation because some cases carry `Error`
+    public static func == (lhs: AudioCaptureError, rhs: AudioCaptureError) -> Bool {
+        switch (lhs, rhs) {
+        case (.permissionDenied, .permissionDenied): return true
+        case (.permissionNotDetermined, .permissionNotDetermined): return true
+        case (.audioSessionConfigurationFailed, .audioSessionConfigurationFailed): return true
+        case (.audioEngineStartFailed(let a), .audioEngineStartFailed(let b)):
+            let na = a as NSError
+            let nb = b as NSError
+            return na.domain == nb.domain && na.code == nb.code
+        case (.audioEngineStopFailed(let a), .audioEngineStopFailed(let b)):
+            let na = a as NSError
+            let nb = b as NSError
+            return na.domain == nb.domain && na.code == nb.code
+        case (.invalidConfiguration, .invalidConfiguration): return true
+        case (.captureAlreadyInProgress, .captureAlreadyInProgress): return true
+        case (.captureNotInProgress, .captureNotInProgress): return true
+        case (.streamingFailed(let a), .streamingFailed(let b)):
+            let na = a as NSError
+            let nb = b as NSError
+            return na.domain == nb.domain && na.code == nb.code
+        case (.exportFailed(let a), .exportFailed(let b)):
+            let na = a as NSError
+            let nb = b as NSError
+            return na.domain == nb.domain && na.code == nb.code
+        case (.invalidAudioFormat, .invalidAudioFormat): return true
+        case (.deviceInterrupted, .deviceInterrupted): return true
+        default: return false
         }
     }
 }
