@@ -41,7 +41,10 @@ let config = AudioCaptureConfig(
     sampleRate: 16000,
     channels: 1,
     vadSensitivity: 0.5,
-    noiseSuppressionLevel: 0.5
+    noiseSuppressionLevel: 0.5,
+    frameDurationMs: 20,
+    persistRawAudio: false,
+    inputRoutePolicy: .builtInPreferred
 )
 
 // Initialize SDK
@@ -70,12 +73,13 @@ sdk.onError = { error in
 // Start capture
 try sdk.startCapture()
 
-// Start streaming (optional)
-let target = StreamTarget(
-    url: URL(string: "wss://your-server.com/stream")!,
-    headers: ["Authorization": "Bearer token"]
-)
-try sdk.startStream(to: target)
+// Start streaming (optional, V2 - BYO provider). For V1 use Apple Speech and dictation callbacks.
+// Example (only needed if you implement BYO streaming):
+// let target = StreamTarget(
+//     url: URL(string: "wss://your-server.com/stream")!,
+//     headers: ["Authorization": "Bearer token"]
+// )
+// try sdk.startStream(to: target)
 
 // Stop capture
 try sdk.stopCapture()

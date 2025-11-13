@@ -4,7 +4,7 @@ This document describes the public API exposed by the `SwiftDictation` SDK, how 
 
 ## Overview
 
-`SwiftDictation` provides low-latency audio capture, preprocessing (VAD, AGC, optional RNNoise), chunked streaming, local persistence, and export utilities for iOS and macOS. The API is synchronous where appropriate and uses async/await for permission and export flows.
+`SwiftDictation` provides low-latency audio capture, lightweight preprocessing (VAD, AGC), optional chunked streaming, local persistence utilities, and dictation convenience helpers. V1 is iOS‑first and uses Apple's Speech framework as the default ASR path (no server required). Streaming to external providers is supported as an optional V2 feature.
 
 ## Quick start example
 
@@ -33,27 +33,31 @@ try sdk.stopCapture()
 
 ## Public types
 
-- `AudioCaptureConfig`
-  - Configuration knobs:
-    - `sampleRate: Double` — capture sample rate in Hz (default 16000).
-    - `channels: Int` — number of channels (default 1).
-    - `vadSensitivity: Float` — 0.0–1.0 (higher = more sensitive).
-    - `noiseSuppressionLevel: Float` — 0.0–1.0 for built-in suppression.
-    - `chunkDurationMs: Int` — duration of streaming chunks in ms.
-    - `enableHardwareEncode: Bool` — allow hardware encoders when available.
-    - `bluetoothPreferred: Bool` — prefer Bluetooth inputs if present.
-    - `enableAGC: Bool` — automatic gain control.
-    - `highPassFilterCutoff: Double` — high-pass cutoff frequency (Hz).
+ - `AudioCaptureConfig`
+   - Configuration knobs:
+     - `sampleRate: Double` — capture sample rate in Hz (default 16000 for BYO streaming; device/native accepted for Apple Speech).
+     - `channels: Int` — number of channels (default 1).
+     - `vadSensitivity: Float` — 0.0–1.0 (higher = more sensitive).
+     - `enableAGC: Bool` — automatic gain control (default true).
+     - `highPassFilterCutoff: Double` — high-pass cutoff frequency (Hz).
+     - `frameDurationMs: Int` — streaming frame size in ms when using BYO Streaming (20|40|60; default 20).
+     - `persistRawAudio: Bool` — persist raw mic audio locally (default false; opt‑in).
+     - `inputRoutePolicy: InputRoutePolicy` — prefer built‑in mic vs allow Bluetooth (default built‑in preferred).
 
 - `CaptureMode` — `.continuous`, `.voiceActivated`, `.manual`
 - `AudioFormat` — `.pcm16`, `.wav`, `.m4a`
 - `PermissionStatus` — `.granted`, `.denied`, `.notDetermined`
 - `VADState` — `.speech`, `.silence`, `.unknown`
-- `StreamTarget` — `{ url: URL, headers: [String: String], protocolType: .websocket | .grpc }`
+ - `StreamTarget` — `{ url: URL, headers: [String: String], protocolType?: .websocket | .grpc }` (protocolType is optional; BYO streaming is V2)
 - `AudioFrame` — `{ data: Data, timestamp: TimeInterval, sampleRate: Double, channels: Int }` (PCM16)
 - `ChunkMetadata` — `{ sequenceId: Int, startTimestamp: TimeInterval, endTimestamp: TimeInterval, sampleRate: Double, deviceId: String, micPosition?: String, confidenceHint?: Float }`
 - `ExportResult` — `{ url: URL, duration: TimeInterval, format: AudioFormat }`
 - `AudioCaptureError` — `permissionDenied`, `audioEngineStartFailed`, `streamingFailed`, `exportFailed`, etc.
+ - `ExportResult` — `{ url: URL, duration: TimeInterval, format: AudioFormat }`
+ - `AudioCaptureError` — `permissionDenied`, `audioEngineStartFailed`, `streamingFailed`, `exportFailed`, etc.
+ - Dictation convenience callbacks:
+   - `onPartialTranscript: ((String) -> Void)?` — partial/intermediate transcript updates (Native Speech).
+   - `onFinalTranscript: ((String) -> Void)?` — final transcript for a committed block.
 
 ## `AudioCaptureSDK` — main entry
 
@@ -82,6 +86,7 @@ public func stopCapture() throws
 Streaming
 
 ```swift
+// BYO streaming is optional (V2). V1 apps should prefer Apple's Speech framework for transcription.
 public func startStream(to target: StreamTarget) throws
 public func stopStream() throws
 ```
@@ -98,6 +103,12 @@ Callbacks (public vars)
 - `public var onVADStateChange: ((VADState) -> Void)?` — voice activity detection updates.
 - `public var onChunkSent: ((ChunkMetadata) -> Void)?` — chunk ACK metadata when streamed.
 - `public var onError: ((Error) -> Void)?` — fatal/non-fatal error reporting.
+ - `public var onFrame: ((AudioFrame) -> Void)?` — receives each processed frame as raw PCM16 `Data`.
+ - `public var onVADStateChange: ((VADState) -> Void)?` — voice activity detection updates.
+ - `public var onChunkSent: ((ChunkMetadata) -> Void)?` — chunk ACK metadata when streamed.
+ - `public var onError: ((Error) -> Void)?` — fatal/non-fatal error reporting.
+ - `public var onPartialTranscript: ((String) -> Void)?` — incremental partial transcripts (Native Speech).
+ - `public var onFinalTranscript: ((String) -> Void)?` — final transcript output (Native Speech).
 
 **Threading note:** callbacks may be invoked on background threads. Dispatch to the main thread for UI updates.
 
@@ -105,10 +116,11 @@ Callbacks (public vars)
 
 - `startCapture` throws `AudioCaptureError.permissionDenied` when microphone permission is not granted.
 - The SDK captures 16-bit PCM and attempts to convert inputs to the requested `sampleRate` and channel count.
-- Chunking uses device-monotonic timestamps and sequence IDs; `chunkDurationMs` defines the target chunk size.
-- `startStream` opens a WebSocket (or gRPC when implemented); audio chunks are base64-encoded in messages with accompanying `ChunkMetadata`.
-- Raw audio is persisted locally by default so recordings can be reprocessed.
-- `exportRecording(.wav, destination:)` will write a valid WAV file with a standard header. `m4a` support may be unavailable on early versions and can return `AudioCaptureError.exportFailed`.
+ - The SDK captures 16-bit PCM and will convert inputs to the configured `sampleRate`/channels where possible.
+ - Native Speech (V1): `onPartialTranscript` and `onFinalTranscript` provide incremental and final results via Apple's `SFSpeechRecognizer`. No external server required.
+ - BYO Streaming (V2): frames are emitted at `frameDurationMs` cadence (20–60 ms) as binary WebSocket frames; frames are grouped into 0.5–1.0 s segments for ACK/resume bookkeeping. JSON control messages may be used for session metadata; avoid base64-in-JSON for audio payloads (it adds ~33% overhead).
+ - Raw audio persistence is opt‑in via `persistRawAudio` (default false). When enabled, audio is stored in app Application Support with file protection and excluded from backups.
+ - `exportRecording(.wav, destination:)` will write a valid WAV file with a standard header. `m4a` support may be unavailable on early versions and can return `AudioCaptureError.exportFailed`.
 
 ## Error handling
 
@@ -121,6 +133,10 @@ Callbacks (public vars)
 - Use `onVADStateChange` to gate UI updates (recording indicator) and to avoid sending silence to the backend.
 - Persist raw audio locally for later reprocessing and model improvements.
 - Keep chunk sizes between 800ms and 2000ms for a good latency/overhead balance.
+ - For V1 (recommended): use Apple Speech (`SFSpeechRecognizer`) for transcription — simplest and zero backend maintenance.
+ - Use `onVADStateChange` to gate UI updates (recording indicator) and to avoid sending silence to the backend.
+ - Persist raw audio is opt‑in; only enable when you need later reprocessing or debugging.
+ - For BYO Streaming (V2): prefer binary WebSocket frames (raw PCM) and small frame cadence (20–60 ms). Group frames into ~0.5–1.0 s segments for ACK/resume bookkeeping.
 
 ## Glossary (technical terms)
 
@@ -139,13 +155,15 @@ Callbacks (public vars)
 ## Example: streaming payload (JSON)
 
 ```json
+// BYO streaming V2: prefer binary WebSocket frames for audio payloads.
+// Example control message (JSON) for segment metadata; audio itself should be sent as a binary frame.
 {
   "sequenceId": 12,
-  "startTimestamp": 123456789.123,
-  "endTimestamp": 123456789.923,
+  "startSampleIndex": 123456789,
+  "endSampleIndex": 123456789 + 16000,
   "sampleRate": 16000,
   "deviceId": "device-uuid",
-  "audioData": "<base64-encoded PCM16 chunk>"
+  "segmentDurationMs": 1000
 }
 ```
 

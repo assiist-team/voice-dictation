@@ -6,7 +6,7 @@ internal class AudioCaptureEngine {
     private let config: AudioCaptureConfig
     private(set) var audioEngine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
-    private var audioFormat: AVAudioFormat?
+    private(set) var audioFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
     private var isCapturing = false
     private let processingQueue = DispatchQueue(label: "com.swiftdictation.audio.processing", qos: .userInitiated)

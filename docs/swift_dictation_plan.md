@@ -139,7 +139,7 @@ Below is the current implementation state and a checklist of remaining work (che
 
 ### Remaining work
 
-- [ ] V1 Native Speech: add `onPartialTranscript`/`onFinalTranscript` and dictation convenience wrapper.
+- [x] V1 Native Speech: add `onPartialTranscript`/`onFinalTranscript` and dictation convenience wrapper. (Implemented: `Sources/SwiftDictation/NativeSpeechRecognizer.swift`, `Sources/SwiftDictation/AudioCaptureSDK.swift` integration, example updated in `Examples/iOS/VoiceDictationView.swift`)
 - [ ] Background/interruption handling and permission recovery on iOS.
 - [ ] Opt‑in raw audio persistence with secure storage; export utilities.
 - [ ] Metrics/telemetry: capture→emit latency, buffer underruns, CPU usage.

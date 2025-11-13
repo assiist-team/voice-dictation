@@ -30,6 +30,20 @@ public struct AudioCaptureConfig {
     /// High-pass filter cutoff frequency in Hz (0 to disable)
     public var highPassFilterCutoff: Double
     
+    /// Streaming frame duration in milliseconds when using BYO streaming (20|40|60)
+    public var frameDurationMs: Int
+
+    /// Persist raw mic audio locally (opt-in; default false)
+    public var persistRawAudio: Bool
+
+    /// Input route policy controls preferred input selection
+    public var inputRoutePolicy: InputRoutePolicy
+
+    public enum InputRoutePolicy {
+        case builtInPreferred
+        case bluetoothAllowed
+    }
+    
     public init(
         sampleRate: Double = 16000,
         channels: Int = 1,
@@ -39,7 +53,10 @@ public struct AudioCaptureConfig {
         enableHardwareEncode: Bool = false,
         bluetoothPreferred: Bool = true,
         enableAGC: Bool = true,
-        highPassFilterCutoff: Double = 80.0
+        highPassFilterCutoff: Double = 80.0,
+        frameDurationMs: Int = 20,
+        persistRawAudio: Bool = false,
+        inputRoutePolicy: InputRoutePolicy = .builtInPreferred
     ) {
         self.sampleRate = sampleRate
         self.channels = channels
@@ -50,6 +67,9 @@ public struct AudioCaptureConfig {
         self.bluetoothPreferred = bluetoothPreferred
         self.enableAGC = enableAGC
         self.highPassFilterCutoff = highPassFilterCutoff
+        self.frameDurationMs = frameDurationMs
+        self.persistRawAudio = persistRawAudio
+        self.inputRoutePolicy = inputRoutePolicy
     }
 }
 

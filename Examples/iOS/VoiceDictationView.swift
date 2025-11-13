@@ -48,45 +48,75 @@ public struct VoiceDictationView: View {
     }
     
     private var controlRow: some View {
-        HStack(spacing: 16) {
-            // Cancel button (left)
-            Button(action: {
-                viewModel.cancelRecording()
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.gray)
+        VStack(spacing: 8) {
+            // Interruption banner
+            if viewModel.state == .interrupted {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Recording interrupted. Resuming...")
+                        .font(.system(size: 12))
+                        .foregroundColor(.orange)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(8)
             }
-            .disabled(viewModel.state == .processing)
-            .accessibilityLabel("Cancel recording")
             
-            // Waveform (middle)
-            WaveformView(amplitudes: viewModel.waveformAmplitudes)
-                .frame(height: 40)
+            // Transcript display
+            if !viewModel.currentTranscript.isEmpty {
+                Text(viewModel.currentTranscript)
+                    .font(.system(size: 14))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+            }
             
-            // Timer and confirm (right)
-            HStack(spacing: 12) {
-                if viewModel.state == .processing {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else {
-                    // Timer
-                    Text(viewModel.formattedTime)
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                    
-                    // Confirm/Check button
-                    Button(action: {
-                        viewModel.commitRecording { transcript in
-                            text += transcript
+            HStack(spacing: 16) {
+                // Cancel button (left)
+                Button(action: {
+                    viewModel.cancelRecording()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.gray)
+                }
+                .disabled(viewModel.state == .processing || viewModel.state == .interrupted)
+                .accessibilityLabel("Cancel recording")
+                
+                // Waveform (middle)
+                WaveformView(amplitudes: viewModel.waveformAmplitudes)
+                    .frame(height: 40)
+                
+                // Timer and confirm (right)
+                HStack(spacing: 12) {
+                    if viewModel.state == .processing {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        // Timer
+                        Text(viewModel.formattedTime)
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        
+                        // Confirm/Check button
+                        Button(action: {
+                            viewModel.commitRecording { transcript in
+                                text += transcript + " "
+                            }
+                        }) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 24))
+                                .foregroundColor(.green)
                         }
-                    }) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.green)
+                        .disabled(viewModel.state == .processing || viewModel.state == .interrupted)
+                        .accessibilityLabel("Confirm and commit recording")
                     }
-                    .disabled(viewModel.state == .processing)
-                    .accessibilityLabel("Confirm and process recording")
                 }
             }
         }
@@ -99,6 +129,7 @@ class VoiceDictationViewModel: ObservableObject {
     @Published var state: DictationState = .idle
     @Published var waveformAmplitudes: [Float] = []
     @Published var recordingTime: TimeInterval = 0
+    @Published var currentTranscript: String = ""
     
     private let sdk: AudioCaptureSDK
     private var timer: Timer?
@@ -110,6 +141,7 @@ class VoiceDictationViewModel: ObservableObject {
         case listening
         case paused
         case processing
+        case interrupted
         case error(String)
     }
     
@@ -128,7 +160,7 @@ class VoiceDictationViewModel: ObservableObject {
         Task {
             let status = try? await sdk.requestPermissions()
             if status != .granted {
-                state = .error("Microphone permission denied")
+                state = .error("Microphone or speech recognition permission denied")
             }
         }
     }
@@ -155,7 +187,39 @@ class VoiceDictationViewModel: ObservableObject {
         
         sdk.onError = { [weak self] error in
             Task { @MainActor in
-                self?.state = .error(error.localizedDescription)
+                // Check if it's an interruption error
+                if let captureError = error as? AudioCaptureError,
+                   case .deviceInterrupted = captureError {
+                    // Only set interrupted state if we're currently listening
+                    if self?.state == .listening {
+                        self?.state = .interrupted
+                    }
+                } else {
+                    self?.state = .error(error.localizedDescription)
+                }
+            }
+        }
+        
+        sdk.onInterruptionRecovered = { [weak self] in
+            Task { @MainActor in
+                // Automatically resume if we were interrupted
+                if self?.state == .interrupted {
+                    self?.state = .listening
+                }
+            }
+        }
+        
+        // Native Speech callbacks
+        sdk.onPartialTranscript = { [weak self] text in
+            Task { @MainActor in
+                self?.currentTranscript = text
+            }
+        }
+        
+        sdk.onFinalTranscript = { [weak self] text in
+            Task { @MainActor in
+                // Update current transcript with final version
+                self?.currentTranscript = text
             }
         }
     }
@@ -183,8 +247,9 @@ class VoiceDictationViewModel: ObservableObject {
         guard state == .listening || state == .paused else { return }
         
         do {
-            try sdk.stopCapture()
-            reset()
+            // Cancel current block (discards transcript)
+            try sdk.cancelCurrentBlock()
+            currentTranscript = ""
         } catch {
             state = .error(error.localizedDescription)
         }
@@ -205,39 +270,33 @@ class VoiceDictationViewModel: ObservableObject {
     func commitRecording(completion: @escaping (String) -> Void) {
         guard state == .listening || state == .paused else { return }
         
-        state = .processing
+        // Store current partial transcript before committing
+        let partialText = currentTranscript
         
-        Task {
-            do {
-                // Stop capture
-                try sdk.stopCapture()
-                stopTimer()
-                
-                // Export audio
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("recording_\(UUID().uuidString).wav")
-                
-                let exportResult = try await sdk.exportRecording(format: .wav, destination: tempURL)
-                
-                // TODO: Send to ASR service and get transcript
-                // For now, simulate with a placeholder
-                let transcript = await transcribeAudio(url: tempURL)
-                
-                await MainActor.run {
-                    completion(transcript)
-                    reset()
-                }
-            } catch {
-                await MainActor.run {
-                    state = .error(error.localizedDescription)
+        do {
+            // Commit current block - this will trigger onFinalTranscript callback
+            try sdk.commitCurrentBlock()
+            
+            // Use the partial transcript immediately for UI feedback
+            // The onFinalTranscript callback will update currentTranscript when it arrives
+            if !partialText.isEmpty {
+                completion(partialText)
+                // Clear after a short delay to allow final transcript to arrive
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if self.currentTranscript == partialText {
+                        self.currentTranscript = ""
+                    }
                 }
             }
+        } catch {
+            state = .error(error.localizedDescription)
         }
     }
     
     private func reset() {
         state = .idle
         recordingTime = 0
+        currentTranscript = ""
         waveformAmplitudes.removeAll()
         audioFrames.removeAll()
         timer?.invalidate()
@@ -283,11 +342,6 @@ class VoiceDictationViewModel: ObservableObject {
         }
     }
     
-    private func transcribeAudio(url: URL) async -> String {
-        // TODO: Integrate with ASR service (Deepgram, Google, AssemblyAI, etc.)
-        // For now, return placeholder
-        return "[Transcribed text would appear here]"
-    }
 }
 
 /// Waveform visualization view

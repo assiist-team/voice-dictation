@@ -6,17 +6,28 @@ internal class AudioStorage {
     private let storageDirectory: URL
     
     init() throws {
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        storageDirectory = documentsPath.appendingPathComponent("SwiftDictation", isDirectory: true)
+        let appSupportPath = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        storageDirectory = appSupportPath.appendingPathComponent("SwiftDictation", isDirectory: true)
         
         // Create directory if it doesn't exist
         try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        
+        // Exclude from iCloud backups
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        try storageDirectory.setResourceValues(resourceValues)
     }
     
     func saveRawAudio(_ data: Data, sessionId: String) throws -> URL {
         let filename = "\(sessionId)_raw_\(Date().timeIntervalSince1970).pcm"
         let fileURL = storageDirectory.appendingPathComponent(filename)
         try data.write(to: fileURL)
+        
+        // Set file protection on iOS
+        #if os(iOS)
+        try setFileProtection(fileURL: fileURL)
+        #endif
+        
         return fileURL
     }
     
@@ -24,10 +35,37 @@ internal class AudioStorage {
         let filename = "\(sessionId)_processed_\(Date().timeIntervalSince1970).pcm"
         let fileURL = storageDirectory.appendingPathComponent(filename)
         try data.write(to: fileURL)
+        
+        // Set file protection on iOS
+        #if os(iOS)
+        try setFileProtection(fileURL: fileURL)
+        #endif
+        
         return fileURL
     }
     
+    #if os(iOS)
+    /// Set file protection attributes on iOS
+    private func setFileProtection(fileURL: URL) throws {
+        let attributes: [FileAttributeKey: Any] = [
+            .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+        ]
+        try FileManager.default.setAttributes(attributes, ofItemAtPath: fileURL.path)
+    }
+    #endif
+    
     func exportAsWAV(audioData: Data, sampleRate: Double, channels: Int, destination: URL) throws {
+        // Validate parameters
+        guard channels > 0 else {
+            throw AudioCaptureError.invalidAudioFormat
+        }
+        guard sampleRate > 0 else {
+            throw AudioCaptureError.invalidAudioFormat
+        }
+        guard !audioData.isEmpty else {
+            throw AudioCaptureError.exportFailed(NSError(domain: "AudioCaptureSDK", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot export empty audio buffer"]))
+        }
+        
         let file = try FileHandle(forWritingTo: destination)
         defer { try? file.close() }
         
