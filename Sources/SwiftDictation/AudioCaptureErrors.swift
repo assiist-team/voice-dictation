@@ -14,6 +14,8 @@ public enum AudioCaptureError: LocalizedError, Equatable {
     case exportFailed(Error)
     case invalidAudioFormat
     case deviceInterrupted
+    case speechRecognizerUnavailableForLocale(String)
+    case speechRecognizerNotAvailable
     
     public var errorDescription: String? {
         switch self {
@@ -41,6 +43,10 @@ public enum AudioCaptureError: LocalizedError, Equatable {
             return "Invalid audio format"
         case .deviceInterrupted:
             return "Audio capture was interrupted by device"
+        case .speechRecognizerUnavailableForLocale(let id):
+            return "Speech recognition is not supported for locale '\(id)'"
+        case .speechRecognizerNotAvailable:
+            return "Speech recognition is currently unavailable (no network or on-device model not ready)"
         }
     }
 
@@ -71,6 +77,8 @@ public enum AudioCaptureError: LocalizedError, Equatable {
             return na.domain == nb.domain && na.code == nb.code
         case (.invalidAudioFormat, .invalidAudioFormat): return true
         case (.deviceInterrupted, .deviceInterrupted): return true
+        case (.speechRecognizerUnavailableForLocale(let a), .speechRecognizerUnavailableForLocale(let b)): return a == b
+        case (.speechRecognizerNotAvailable, .speechRecognizerNotAvailable): return true
         default: return false
         }
     }

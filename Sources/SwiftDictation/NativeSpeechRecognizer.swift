@@ -37,11 +37,11 @@ internal class NativeSpeechRecognizer: NSObject {
     /// Start a new recognition block
     func startBlock() throws {
         guard let speechRecognizer = speechRecognizer else {
-            throw AudioCaptureError.invalidConfiguration
+            throw AudioCaptureError.speechRecognizerUnavailableForLocale(Locale.current.identifier)
         }
-        
+
         guard speechRecognizer.isAvailable else {
-            throw AudioCaptureError.invalidConfiguration
+            throw AudioCaptureError.speechRecognizerNotAvailable
         }
         
         // Cancel any existing task
@@ -51,9 +51,11 @@ internal class NativeSpeechRecognizer: NSObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         
-        // Best-effort on-device recognition if available
+        // Let the system choose: prefer server recognition (more accurate),
+        // falls back to on-device when offline. Forcing on-device silently
+        // fails when the language model hasn't been downloaded.
         if #available(iOS 13.0, macOS 10.15, *) {
-            request.requiresOnDeviceRecognition = speechRecognizer.supportsOnDeviceRecognition
+            request.requiresOnDeviceRecognition = false
         }
         
         self.recognitionRequest = request
