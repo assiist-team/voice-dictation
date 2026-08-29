@@ -1,136 +1,113 @@
-# Swift Audio Capture SDK
+# Swift Voice Dictation
 
-A production-grade Swift module for ultra-faithful per-word audio capture, preprocessing, VAD, chunked streaming, and export APIs.
+A native Swift package for microphone capture, Apple Speech transcription,
+voice-activity detection, audio chunking, WebSocket delivery, and WAV export on
+iOS and macOS.
 
-## Features
+The package provides the capture and transport primitives used by a dictation
+interface. It deliberately leaves any remote transcription service and product UI
+to the integrating application.
 
-- **Low-latency audio capture** using AVAudioEngine with hardware-backed buffers
-- **Voice Activity Detection (VAD)** with tunable sensitivity
-- **Audio preprocessing** including noise suppression, AGC, and high-pass filtering
-- **Chunked streaming** via WebSocket with timestamps and ACKs
-- **Local storage** of raw and processed audio for reprocessing
-- **Cross-platform** support for iOS and macOS
+## What is included
+
+- `AVAudioEngine` microphone capture with pause, resume, interruption, and route-change handling
+- partial and final transcription callbacks backed by Apple's Speech framework
+- energy-based voice-activity detection
+- configurable audio chunking with timestamps and sequence metadata
+- optional WebSocket delivery to an application-supplied endpoint
+- in-memory audio storage and WAV export
+- lightweight high-pass filtering and gain normalization
+- latency and processing metrics callbacks
 
 ## Installation
 
-### Swift Package Manager
-
-Add the following to your `Package.swift`:
+Add the package with Swift Package Manager:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/swift_dictation.git", from: "1.0.0")
+    .package(
+        url: "https://github.com/nine4-team/swift-voice-dictation.git",
+        branch: "main"
+    )
 ]
 ```
 
-### CocoaPods
+Then add `SwiftDictation` as a dependency of your application target.
 
-```ruby
-pod 'SwiftDictation', '~> 1.0.0'
-```
-
-## Usage
-
-### Basic Usage
+## Basic usage
 
 ```swift
 import SwiftDictation
 
-// Create configuration
 let config = AudioCaptureConfig(
-    sampleRate: 16000,
+    sampleRate: 16_000,
     channels: 1,
     vadSensitivity: 0.5,
-    noiseSuppressionLevel: 0.5,
     frameDurationMs: 20,
     persistRawAudio: false,
     inputRoutePolicy: .builtInPreferred
 )
 
-// Initialize SDK
-let sdk = AudioCaptureSDK(config: config)
+let capture = AudioCaptureSDK(config: config)
 
-// Request permissions
-let status = try await sdk.requestPermissions()
-guard status == .granted else {
-    // Handle permission denial
-    return
+capture.onPartialTranscript = { text in
+    print("Partial: \(text)")
 }
 
-// Setup callbacks
-sdk.onFrame = { frame in
-    // Handle audio frame
+capture.onFinalTranscript = { text in
+    print("Final: \(text)")
 }
 
-sdk.onVADStateChange = { state in
-    // Handle VAD state changes
+capture.onError = { error in
+    print("Capture error: \(error)")
 }
 
-sdk.onError = { error in
-    // Handle errors
-}
+let permission = try await capture.requestPermissions()
+guard permission == .granted else { return }
 
-// Start capture
-try sdk.startCapture()
+try capture.startCapture()
 
-// Start streaming (optional, V2 - BYO provider). For V1 use Apple Speech and dictation callbacks.
-// Example (only needed if you implement BYO streaming):
-// let target = StreamTarget(
-//     url: URL(string: "wss://your-server.com/stream")!,
-//     headers: ["Authorization": "Bearer token"]
-// )
-// try sdk.startStream(to: target)
-
-// Stop capture
-try sdk.stopCapture()
+// Later:
+try capture.stopCapture()
 ```
 
-### Voice Dictation UI (SwiftUI)
+Apps must include microphone and speech-recognition usage descriptions in their
+platform configuration. The example iOS target demonstrates the required setup.
+
+## Optional streaming
+
+The SDK can send audio chunks to an endpoint supplied by the integrating app:
 
 ```swift
-import SwiftUI
-import SwiftDictation
+let target = StreamTarget(
+    url: URL(string: "wss://example.com/audio")!,
+    headers: ["Authorization": "Bearer <token>"]
+)
 
-struct ContentView: View {
-    @State private var text: String = ""
-    
-    var body: some View {
-        VStack {
-            TextEditor(text: $text)
-            VoiceDictationView(text: $text)
-        }
-    }
-}
+try capture.startStream(to: target)
 ```
 
-> Note: Cross-platform plugin work was experimental and has been removed from this repository. Use the core Swift SDK (`SwiftDictation`) for iOS/macOS integration.
+WebSocket transport is implemented. The `grpc` protocol option is reserved but not
+implemented.
 
-## Configuration Options
+## Verification
 
-- `sampleRate`: Audio sample rate in Hz (default: 16000)
-- `channels`: Number of audio channels (default: 1 for mono)
-- `vadSensitivity`: VAD sensitivity 0.0-1.0 (default: 0.5)
-- `noiseSuppressionLevel`: Noise suppression level 0.0-1.0 (default: 0.5)
-- `chunkDurationMs`: Chunk duration for streaming in milliseconds (default: 1000)
-- `enableHardwareEncode`: Enable hardware encoding if available (default: false)
-- `bluetoothPreferred`: Prefer Bluetooth devices (default: true)
-- `enableAGC`: Enable automatic gain control (default: true)
-- `highPassFilterCutoff`: High-pass filter cutoff frequency in Hz (default: 80.0)
+```bash
+swift test
+```
 
-## Architecture
-
-- **Capture Layer**: AVAudioEngine for low-latency PCM capture
-- **Preprocessing Layer**: VAD, noise suppression, AGC, filtering
-- **Transport Layer**: Chunked streaming via WebSocket/gRPC
-- **Storage Layer**: Local secure storage of raw and processed audio
+The package currently has 15 passing unit tests covering configuration, state
+transitions, VAD, chunking, WAV export, and transcript callback behavior. Microphone,
+permission, route-change, and Apple Speech behavior still require device or simulator
+testing.
 
 ## Requirements
 
-- iOS 14.0+ / macOS 11.0+
-- Swift 5.9+
-- Xcode 15.0+
+- iOS 14 or later
+- macOS 11 or later
+- Swift 5.9 or later
+- Xcode 15 or later
 
 ## License
 
-MIT License - see LICENSE file for details
-
+MIT. See [LICENSE](LICENSE).
